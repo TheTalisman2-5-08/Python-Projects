@@ -1,0 +1,275 @@
+import os
+from flask import Flask, render_template_string, request
+import pandas as pd
+import plotly.express as px
+
+app = Flask(__name__)
+
+html_template = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Data Visualization Dashboard</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+    <style>
+        body {
+            background-color: #1a1a1a;
+            color: #ffffff;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        #drop-zone {
+            border: 2px dashed #007bff;
+            padding: 20px;
+            text-align: center;
+            font-size: 16px;
+            color: #007bff;
+            background-color: #2b2b2b;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        }
+        #plot-div {
+            background-color: #2b2b2b;
+            padding: 20px;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        }
+        #filter-form {
+            margin-top: 20px;
+            background-color: #2b2b2b;
+            padding: 20px;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        }
+        .btn-primary {
+            background-color: #007bff;
+            border-color: #007bff;
+        }
+        .btn-primary:hover {
+            background-color: #0069d9;
+            border-color: #0062cc;
+        }
+    </style>
+</head>
+<body>
+    <div class="container my-5">
+        <h1 class="text-center mb-4" style="font-weight: bold;">Data Visualization Dashboard</h1>
+        <p class="text-center mb-4" style="font-weight: bold;">Project Created By Ibrahim Saeed</p>
+        <div id="drop-zone" class="mb-4">
+            Drop your file here or click to select a file
+            <input type="file" id="file-input" accept=".csv, .xlsx" style="display: none;">
+        </div>
+        {% if plot_div %}
+        <div class="form-group">
+            <label for="chart-type">Select Chart Type:</label>
+            <select id="chart-type" class="form-control">
+                <option value="default">Default</option>
+                <option value="scatter">Scatter Plot</option>
+                <option value="pie">Pie Chart</option>
+                <option value="histogram">Histogram</option>
+            </select>
+        </div>
+        <div id="plot-div">{{ plot_div|safe }}</div>
+        <form id="filter-form">
+            <div class="form-group">
+                <label for="column">Filter by:</label>
+                <select id="column" name="column" class="form-control">
+                    <option value="">Select a column</option>
+                    {% for col in columns %}
+                    <option value="{{ col }}">{{ col }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <input type="text" id="value" name="value" class="form-control" placeholder="Enter value">
+            </div>
+            <button type="button" id="filter-btn" class="btn btn-primary">Filter</button>
+        </form>
+        <script>
+            var originalData = {{ data|tojson }};
+            var data = originalData;
+            var chartType = 'default';
+
+            $('#chart-type').change(function() {
+                chartType = $(this).val();
+                updateChart(data);
+            });
+
+            $('#filter-btn').click(function(e) {
+                e.preventDefault(); // Prevent form submission
+                var column = $('#column').val();
+                var value = $('#value').val();
+                filterData(column, value);
+            });
+
+            function filterData(column, value) {
+                $.ajax({
+                    url: '/filter',
+                    type: 'POST',
+                    data: JSON.stringify({
+                        column: column,
+                        value: value,
+                        data: originalData
+                    }),
+                    contentType: 'application/json; charset=utf-8',
+                    dataType: 'json',
+                    success: function(response) {
+                        if (response.error) {
+                            alert(response.error);
+                        } else {
+                            data = response.data;
+                            updateChart(data);
+                        }
+                    }
+                });
+            }
+
+            function updateChart(data) {
+                $.ajax({
+                    url: '/chart',
+                    type: 'POST',
+                    data: JSON.stringify({
+                        data: data,
+                        chartType: chartType
+                    }),
+                    contentType: 'application/json; charset=utf-8',
+                    dataType: 'json',
+                    success: function(response) {
+                        $('#plot-div').html(response.plot_div);
+                    }
+                });
+            }
+        </script>
+        {% elif error %}
+        <p class="text-danger">{{ error }}</p>
+        {% else %}
+        <p>No file uploaded yet.</p>
+        {% endif %}
+    </div>
+
+    <script>
+        // Drag and drop functionality
+        var dropZone = document.getElementById('drop-zone');
+        var fileInput = document.getElementById('file-input');
+
+        dropZone.addEventListener('dragover', function(e) {
+            e.preventDefault();
+            this.classList.add('dragover');
+        });
+
+        dropZone.addEventListener('dragleave', function(e) {
+            e.preventDefault();
+            this.classList.remove('dragover');
+        });
+
+        dropZone.addEventListener('drop', function(e) {
+            e.preventDefault();
+            this.classList.remove('dragover');
+            var file = e.dataTransfer.files[0];
+            handleFileUpload(file);
+        });
+
+        fileInput.addEventListener('change', function(e) {
+            var file = e.target.files[0];
+            handleFileUpload(file);
+        });
+
+        function handleFileUpload(file) {
+            var formData = new FormData();
+            formData.append('file', file);
+
+            $.ajax({
+                url: '/',
+                type: 'POST',
+                data: formData,
+                processData: false,
+                contentType: false,
+                success: function(response) {
+                    $('#drop-zone').html(response);
+                },
+                error: function(xhr, status, error) {
+                    console.error(error);
+                }
+            });
+        }
+    </script>
+</body>
+</html>
+"""
+
+@app.route('/', methods=['GET', 'POST'])
+def index():
+    if request.method == 'POST':
+        file = request.files['file']
+        if file:
+            file_path = os.path.join('uploads', file.filename)
+            file.save(file_path)
+            try:
+                data = pd.read_csv(file_path) if file_path.endswith('.csv') else pd.read_excel(file_path)
+                columns = list(data.columns)
+                fig = create_visualization(data, 'default')
+                plot_div = fig.to_html(full_html=False)
+                return render_template_string(html_template, plot_div=plot_div, columns=columns, data=data.to_dict('records'))
+            except Exception as e:
+                return render_template_string(html_template, error=str(e))
+    return render_template_string(html_template)
+
+@app.route('/filter', methods=['POST'])
+def filter_data():
+    original_data = pd.DataFrame(request.get_json()['data'])
+    column = request.get_json()['column']
+    value = request.get_json()['value']
+    if column and value:
+        try:
+            column_dtype = original_data[column].dtype
+            original_data[column] = original_data[column].astype(str) if column_dtype == object else original_data[column]
+            value = str(value) if column_dtype == object else pd.to_numeric(value, errors='coerce')
+            filtered_data = original_data[original_data[column] == value]
+            return {'data': filtered_data.to_dict('records')}
+        except ValueError:
+            return {'error': 'Invalid value for filtering'}
+    return ''
+
+@app.route('/chart', methods=['POST'])
+def create_chart():
+    data = pd.DataFrame(request.get_json()['data'])
+    chart_type = request.get_json()['chartType']
+    fig = create_visualization(data, chart_type)
+    plot_div = fig.to_html(full_html=False)
+    return {'plot_div': plot_div}
+
+def create_visualization(data, chart_type):
+    num_cols = len(data.select_dtypes(include=['float64', 'int64']).columns)
+    cat_cols = len(data.select_dtypes(include=['object']).columns)
+
+    if chart_type == 'default':
+        if num_cols >= 2 and cat_cols >= 1:
+            fig = px.scatter(data, x=data.columns[0], y=data.columns[1], color=data.columns[2], title="Data Visualization")
+        elif cat_cols >= 1:
+            fig = px.pie(data, names=data.columns[0], title="Data Visualization")
+            fig.update_traces(textinfo='percent+label')
+        else:
+            fig = px.histogram(data, x=data.columns[0], title="Data Visualization")
+    elif chart_type == 'scatter':
+        fig = px.scatter(data, x=data.columns[0], y=data.columns[1], color=data.columns[2] if num_cols >= 3 and cat_cols >= 1 else None, title="Scatter Plot")
+    elif chart_type == 'pie':
+        fig = px.pie(data, names=data.columns[0], title="Pie Chart")
+        fig.update_traces(textinfo='percent+label')
+    elif chart_type == 'histogram':
+        fig = px.histogram(data, x=data.columns[0], title="Histogram")
+        fig.update_layout(xaxis_title=data.columns[0])
+
+    fig.update_layout(
+        font=dict(family="Arial", size=14, color="#ffffff"),
+        plot_bgcolor="#1a1a1a",
+        paper_bgcolor="#1a1a1a",
+        title_font=dict(size=20, color="#007bff"),
+    )
+    fig.update_xaxes(showgrid=True, gridcolor='#333333')
+    fig.update_yaxes(showgrid=True, gridcolor='#333333')
+
+    return fig
+
+if __name__ == '__main__':
+    app.run(debug=True)
